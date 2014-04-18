@@ -5,8 +5,9 @@
   hacked by Sam C. Lin / http://www.lincomatic.com
   from 
    LiquidTWI by Matt Falcon (FalconFour) / http://falconfour.com
-   modified by Stephanie Maks / http://planetstephanie.net
    logic gleaned from Adafruit RGB LCD Shield library
+   Panelolu2 support by Tony Lock / http://blog.think3dprint3d.com
+   enhancements by Nick Sayer / https://github.com/nsayer
 
   Compatible with Adafruit I2C LCD backpack (MCP23008) and
   Adafruit RGB LCD Shield
@@ -15,7 +16,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#if defined (__AVR_ATtiny84__) || defined(__AVR_ATtiny85__) || (__AVR_ATtiny2313__)
+#include "TinyWireM.h"
+#define Wire TinyWireM
+#else
 #include <Wire.h>
+#endif
 #if defined(ARDUINO) && (ARDUINO >= 100) //scl
 #include "Arduino.h"
 #else
@@ -27,7 +33,7 @@
 // bit pattern for the burstBits function is
 //
 //  B7 B6 B5 B4 B3 B2 B1 B0 A7 A6 A5 A4 A3 A2 A1 A0 - MCP23017 
-//  RS RW EN D4 D5 D6 D7 B  G  R     B4 B3 B2 B1 B0 
+//  RS RW EN D4 D5 D6 D7 LB LG LR BZ B4 B3 B2 B1 B0 
 //  15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0  
 #define M17_BIT_RS 0x8000
 #define M17_BIT_RW 0x4000
@@ -39,9 +45,7 @@
 #define M17_BIT_LB 0x0100
 #define M17_BIT_LG 0x0080
 #define M17_BIT_LR 0x0040
-#ifdef PANELOLU2
-  #define M17_BIT_BZ 0x0020 //Added a buzzer on this pin
-#endif
+#define M17_BIT_BZ 0x0020 //Added a buzzer on this pin
 #define M17_BIT_B4 0x0010
 #define M17_BIT_B3 0x0008
 #define M17_BIT_B2 0x0004
@@ -87,7 +91,15 @@ static inline uint8_t wirerecv(void) {
 // for when the sketch calls begin(), except configuring the expander, which
 // is required by any setup.
 
-LiquidTWI2::LiquidTWI2(uint8_t i2cAddr) {
+LiquidTWI2::LiquidTWI2(uint8_t i2cAddr,uint8_t detectDevice, uint8_t backlightInverted) {
+  // if detectDevice != 0, set _deviceDetected to 2 to flag that we should
+  // scan for it in begin()
+#ifdef DETECT_DEVICE
+  _deviceDetected = detectDevice ? 2 : 1;
+#endif
+
+  _backlightInverted = backlightInverted;
+
   //  if (i2cAddr > 7) i2cAddr = 7;
   _i2cAddr = i2cAddr; // transfer this function call's number into our internal class state
   _displayfunction = LCD_4BITMODE | LCD_1LINE | LCD_5x8DOTS; // in case they forget to call begin() at least we have something
@@ -104,6 +116,7 @@ void LiquidTWI2::begin(uint8_t cols, uint8_t lines, uint8_t dotsize) {
 
   Wire.begin();
 
+  uint8_t result;
 #if defined(MCP23017)&&defined(MCP23008)
   if (_mcpType == LTI_TYPE_MCP23017) {
 #endif
@@ -113,30 +126,70 @@ void LiquidTWI2::begin(uint8_t cols, uint8_t lines, uint8_t dotsize) {
     Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
     wiresend(MCP23017_IODIRA);
     wiresend(0xFF);  // all inputs on port A
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
 	  
     Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
     wiresend(MCP23017_IODIRB);
     wiresend(0xFF);  // all inputs on port B
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
     */
 
     // now set up input/output pins
     Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
     wiresend(MCP23017_IODIRA);
     wiresend(0x1F); // buttons input, all others output
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
     
     // set the button pullups
     Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
     wiresend(MCP23017_GPPUA);
     wiresend(0x1F);	
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
     
     Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
     wiresend(MCP23017_IODIRB);
     wiresend(0x00); // all pins output
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
 #endif // MCP23017
 #if defined(MCP23017)&&defined(MCP23008)
   }
@@ -156,16 +209,37 @@ void LiquidTWI2::begin(uint8_t cols, uint8_t lines, uint8_t dotsize) {
     wiresend(0x00);
     wiresend(0x00);
     wiresend(0x00);	
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
 	  
     // now we set the GPIO expander's I/O direction to output since it's soldered to an LCD output.
     Wire.beginTransmission(MCP23008_ADDRESS | _i2cAddr);
     wiresend(MCP23008_IODIR);
     wiresend(0x00); // all output: 00000000 for pins 1...8
-    Wire.endTransmission();
+    result = Wire.endTransmission();
+#ifdef DETECT_DEVICE
+    if (result) {
+        if (_deviceDetected == 2) {
+          _deviceDetected = 0;
+          return;
+        }
+    }
+#endif 
 #endif // MCP23008
 #if defined(MCP23017)&&defined(MCP23008)
   }
+#endif
+
+#ifdef DETECT_DEVICE
+  // If we haven't failed by now, then we pass
+  if (_deviceDetected == 2) _deviceDetected = 1;
 #endif
 
   if (lines > 1) {
@@ -249,18 +323,27 @@ void LiquidTWI2::begin(uint8_t cols, uint8_t lines, uint8_t dotsize) {
 /********** high level commands, for the user! */
 void LiquidTWI2::clear()
 {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   command(LCD_CLEARDISPLAY);  // clear display, set cursor position to zero
   delayMicroseconds(2000);  // this command takes a long time!
 }
 
 void LiquidTWI2::home()
 {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   command(LCD_RETURNHOME);  // set cursor position to zero
   delayMicroseconds(2000);  // this command takes a long time!
 }
 
 void LiquidTWI2::setCursor(uint8_t col, uint8_t row)
 {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 };
   if ( row > _numlines ) row = _numlines - 1;    // we count rows starting w/0
   command(LCD_SETDDRAMADDR | (col + row_offsets[row]));
@@ -268,62 +351,98 @@ void LiquidTWI2::setCursor(uint8_t col, uint8_t row)
 
 // Turn the display on/off (quickly)
 void LiquidTWI2::noDisplay() {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaycontrol &= ~LCD_DISPLAYON;
   command(LCD_DISPLAYCONTROL | _displaycontrol);
 }
 void LiquidTWI2::display() {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaycontrol |= LCD_DISPLAYON;
   command(LCD_DISPLAYCONTROL | _displaycontrol);
 }
 
 // Turns the underline cursor on/off
 void LiquidTWI2::noCursor() {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaycontrol &= ~LCD_CURSORON;
   command(LCD_DISPLAYCONTROL | _displaycontrol);
 }
 void LiquidTWI2::cursor() {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaycontrol |= LCD_CURSORON;
   command(LCD_DISPLAYCONTROL | _displaycontrol);
 }
 
 // Turn on and off the blinking cursor
 void LiquidTWI2::noBlink() {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaycontrol &= ~LCD_BLINKON;
   command(LCD_DISPLAYCONTROL | _displaycontrol);
 }
 void LiquidTWI2::blink() {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaycontrol |= LCD_BLINKON;
   command(LCD_DISPLAYCONTROL | _displaycontrol);
 }
 
 // These commands scroll the display without changing the RAM
 void LiquidTWI2::scrollDisplayLeft(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   command(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVELEFT);
 }
 void LiquidTWI2::scrollDisplayRight(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   command(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVERIGHT);
 }
 
 // This is for text that flows Left to Right
 void LiquidTWI2::leftToRight(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaymode |= LCD_ENTRYLEFT;
   command(LCD_ENTRYMODESET | _displaymode);
 }
 
 // This is for text that flows Right to Left
 void LiquidTWI2::rightToLeft(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaymode &= ~LCD_ENTRYLEFT;
   command(LCD_ENTRYMODESET | _displaymode);
 }
 
 // This will 'right justify' text from the cursor
 void LiquidTWI2::autoscroll(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaymode |= LCD_ENTRYSHIFTINCREMENT;
   command(LCD_ENTRYMODESET | _displaymode);
 }
 
 // This will 'left justify' text from the cursor
 void LiquidTWI2::noAutoscroll(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   _displaymode &= ~LCD_ENTRYSHIFTINCREMENT;
   command(LCD_ENTRYMODESET | _displaymode);
 }
@@ -331,6 +450,9 @@ void LiquidTWI2::noAutoscroll(void) {
 // Allows us to fill the first 8 CGRAM locations
 // with custom characters
 void LiquidTWI2::createChar(uint8_t location, uint8_t charmap[]) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   location &= 0x7; // we only have 8 locations 0-7
   command(LCD_SETCGRAMADDR | (location << 3));
   for (int i=0; i<8; i++) {
@@ -344,11 +466,17 @@ inline void LiquidTWI2::command(uint8_t value) {
 }
 #if defined(ARDUINO) && (ARDUINO >= 100) //scl
 inline size_t LiquidTWI2::write(uint8_t value) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return 1;
+#endif
   send(value, HIGH);
   return 1;
 }
 #else
 inline void LiquidTWI2::write(uint8_t value) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   send(value, HIGH);
 }
 #endif
@@ -356,21 +484,24 @@ inline void LiquidTWI2::write(uint8_t value) {
 /************ low level data pushing commands **********/
 #ifdef MCP23017
 uint8_t LiquidTWI2::readButtons(void) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return 0;
+#endif
   Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
   wiresend(MCP23017_GPIOA);	
   Wire.endTransmission();
   
   Wire.requestFrom(MCP23017_ADDRESS | _i2cAddr, 1);
-  #ifdef PANELOLU2
-     return ~wirerecv() & (uint8_t)(M17_BIT_B2|M17_BIT_B1|M17_BIT_B0);
-  #else
-     return ~wirerecv() & (uint8_t)(M17_BIT_B4|M17_BIT_B3|M17_BIT_B2|M17_BIT_B1|M17_BIT_B0);
-  #endif
+  return ~wirerecv() & ALL_BUTTON_BITS;
 }
 #endif // MCP23017
 
 // Allows to set the backlight, if the LCD backpack is used
 void LiquidTWI2::setBacklight(uint8_t status) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
+  if (_backlightInverted) status ^= 0x7;
 #if defined(MCP23017)&&defined(MCP23008)
   if (_mcpType == LTI_TYPE_MCP23017) {
 #endif
@@ -380,6 +511,7 @@ void LiquidTWI2::setBacklight(uint8_t status) {
     if (status & RED) _backlightBits &= ~M17_BIT_LR; // red on
     if (status & GREEN) _backlightBits &= ~M17_BIT_LG; // green on
     if (status & BLUE) _backlightBits &= ~M17_BIT_LB; // blue on
+    
     burstBits16(_backlightBits);
 #endif // MCP23017
 #if defined(MCP23017)&&defined(MCP23008)
@@ -516,11 +648,8 @@ void LiquidTWI2::burstBits8(uint8_t value) {
 }
 #endif // MCP23008
 
-
-
+#ifdef MCP23017
 //direct access to the registers for interrupt setting and reading, also the tone function using buzzer pin
-#ifdef PANELOLU2
-//check registers
 uint8_t LiquidTWI2::readRegister(uint8_t reg) {
   // read a register
   Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
@@ -532,7 +661,6 @@ uint8_t LiquidTWI2::readRegister(uint8_t reg) {
 }
 
 //set registers
-
 void LiquidTWI2::setRegister(uint8_t reg, uint8_t value) {
     Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
     wiresend(reg);
@@ -540,32 +668,38 @@ void LiquidTWI2::setRegister(uint8_t reg, uint8_t value) {
     Wire.endTransmission();
 }
 
-//cycle the buzzer pin at a cetian frequency for a certain duration (ms) and at a certain freq (hz)
-void LiquidTWI2::buzz(long duration, uint8_t freq) {
+//cycle the buzzer pin at a certain frequency (hz) for a certain duration (ms) 
+//note: a 100Khz TWI/I2C bus on a 16Mhz Arduino will max out at around 1500Hz freq
+void LiquidTWI2::buzz(long duration, uint16_t freq) {
+#ifdef DETECT_DEVICE
+  if (!_deviceDetected) return;
+#endif
   int currentRegister = 0;
+
   // read gpio register
   Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
   wiresend(MCP23017_GPIOA);	
   Wire.endTransmission();
-  
   Wire.requestFrom(MCP23017_ADDRESS | _i2cAddr, 1);
   currentRegister = wirerecv();
+  
   duration *=1000; //convert from ms to us
-  int period = (1.0 / freq) * 1000000; //*1000000 as the delay is in us
-  long elapsed_time = 0;
-  while (elapsed_time < duration)
+  unsigned long cycletime = 1000000UL / freq; // period in us
+  unsigned long cycles = (unsigned long)duration / cycletime;
+  unsigned long ontime;
+  while (cycles-- > 0)
   {
+    ontime = micros();
         Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
         wiresend(MCP23017_GPIOA);
         wiresend(currentRegister |= M17_BIT_BZ);
         while(Wire.endTransmission());
-        delayMicroseconds(period / 2);
+    while((long)(ontime + (cycletime/2) - micros()) > 0);
         Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
         wiresend(MCP23017_GPIOA);
         wiresend(currentRegister &= ~M17_BIT_BZ);
         while(Wire.endTransmission());
-        elapsed_time += (period);
+    while((long)(ontime + cycletime - micros()) > 0);
    }
 }
-
-#endif PANELOLU2
+#endif //MCP23017

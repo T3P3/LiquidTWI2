@@ -5,12 +5,15 @@
 #include "Print.h"
 
 // for memory-constrained projects, comment out the MCP230xx that doesn't apply
-#define MCP23017 // Adafruit RGB LCD
-#ifdef MCP23017
-  #define PANELOLU2 //only possible with the MCP23017 defined. Comment out if not using PANELOLU2
-#endif
+#define MCP23017 // Adafruit RGB LCD (PANELOLU2 is now supported without additional define)
 #define MCP23008 // Adafruit I2C Backpack
 
+// if DETECT_DEVICE is enabled, then when constructor's detectDevice != 0
+// device will be detected in the begin() function...
+// if the device isn't detected in begin() then we won't try to talk to the
+// device in any of the other functions... this allows you to compile the
+// code w/o an LCD installed, and not get hung in the write functions
+#define DETECT_DEVICE // enable device detection code
 
 // for setBacklight() with MCP23017
 #define OFF 0x0
@@ -22,18 +25,21 @@
 #define VIOLET 0x5
 #define WHITE 0x7 
 
+// Standard directional button bits
 #define BUTTON_UP 0x08
 #define BUTTON_DOWN 0x04
 #define BUTTON_LEFT 0x10
 #define BUTTON_RIGHT 0x02
 #define BUTTON_SELECT 0x01
 
-#ifdef PANELOLU2
-  #define ENCODER_C 0x04
-  #define ENCODER_B 0x02
-  #define ENCODER_A 0x01
-#endif
+// Panelolu2 encoder button bits (which has only rotary encoder and encoder button)
+#define PANELOLU2_ENCODER_C 0x04 // == encoder button
+#define PANELOLU2_ENCODER_B 0x02
+#define PANELOLU2_ENCODER_A 0x01
 
+// readButtons() will only return these bit values 
+// (the Panelolu2 encoder bits are subset of these bits)
+#define ALL_BUTTON_BITS (BUTTON_UP|BUTTON_DOWN|BUTTON_LEFT|BUTTON_RIGHT|BUTTON_SELECT)
 
 #define MCP23008_ADDRESS 0x20
 
@@ -124,10 +130,13 @@
 
 class LiquidTWI2 : public Print {
 public:
-	LiquidTWI2(uint8_t i2cAddr);
+	LiquidTWI2(uint8_t i2cAddr,uint8_t detectDevice=0,uint8_t backlightInverted=0);
 
 	void begin(uint8_t cols, uint8_t rows,uint8_t charsize = LCD_5x8DOTS);
 
+#ifdef DETECT_DEVICE
+	uint8_t LcdDetected() { return _deviceDetected; }
+#endif // DETECT_DEVICE
 	void clear();
 	void home();
 
@@ -148,14 +157,6 @@ public:
 
 	void createChar(uint8_t, uint8_t[]);
 	void setCursor(uint8_t, uint8_t); 
-     #ifdef PANELOLU2
-	  //check registers
-       uint8_t readRegister(uint8_t);
-       //set registers
-       void setRegister(uint8_t, uint8_t);
-       //make some noise
-       void buzz(long,uint8_t);
-     #endif
 #if defined(ARDUINO) && (ARDUINO >= 100) // scl
 	virtual size_t write(uint8_t);
 #else
@@ -164,10 +165,18 @@ public:
 	void command(uint8_t);
 #ifdef MCP23017
 	uint8_t readButtons();
+  //check registers
+  uint8_t readRegister(uint8_t);
+  //set registers
+  void setRegister(uint8_t, uint8_t);
+  //make some noise
+  void buzz(long,uint16_t);
 #endif
+	void setMCPType(uint8_t mcptype) {
 #if defined(MCP23017)&&defined(MCP23008)
-	void setMCPType(uint8_t mcptype) { _mcpType = mcptype; }
+	  _mcpType = mcptype;
 #endif //defined(MCP23017)&&defined(MCP23008)
+	}
 
 
 private:
@@ -186,7 +195,10 @@ private:
 	uint8_t _displaymode;
 	uint8_t _numlines,_currline;
 	uint8_t _i2cAddr;
-
+	uint8_t _backlightInverted;
+#ifdef DETECT_DEVICE
+	uint8_t _deviceDetected;
+#endif // DETECT_DEVICE
 #ifdef MCP23017
 	uint16_t _backlightBits; // only for MCP23017
 #endif
