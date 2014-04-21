@@ -618,7 +618,10 @@ void LiquidTWI2::burstBits16(uint16_t value) {
   wiresend(MCP23017_GPIOA);
   wiresend(value & 0xFF); // send A bits
   wiresend(value >> 8);   // send B bits
-  while(Wire.endTransmission());
+  if(ARDUINO >= 155)
+    Wire.endTransmission();
+  else
+    while(Wire.endTransmission()); 
 }
 
 /*
@@ -627,7 +630,10 @@ void LiquidTWI2::burstBits8a(uint8_t value) {
   Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
   wiresend(MCP23017_GPIOA);
   wiresend(value); // last bits are crunched, we're done.
-  while(Wire.endTransmission());
+  if(ARDUINO >= 155)
+    Wire.endTransmission();
+  else
+    while(Wire.endTransmission()); 
 }
 */
 void LiquidTWI2::burstBits8b(uint8_t value) {
@@ -635,7 +641,10 @@ void LiquidTWI2::burstBits8b(uint8_t value) {
   Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
   wiresend(MCP23017_GPIOB);
   wiresend(value); // last bits are crunched, we're done.
-  while(Wire.endTransmission());
+  if(ARDUINO >= 155)
+    Wire.endTransmission();
+  else
+    while(Wire.endTransmission());
 }
 #endif // MCP23017
 #ifdef MCP23008
@@ -644,7 +653,10 @@ void LiquidTWI2::burstBits8(uint8_t value) {
   Wire.beginTransmission(MCP23008_ADDRESS | _i2cAddr);
   wiresend(MCP23008_GPIO);
   wiresend(value); // last bits are crunched, we're done.
-  while(Wire.endTransmission());
+  if(ARDUINO >= 155)
+    Wire.endTransmission();
+  else
+    while(Wire.endTransmission());   
 }
 #endif // MCP23008
 
@@ -693,12 +705,18 @@ void LiquidTWI2::buzz(long duration, uint16_t freq) {
         Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
         wiresend(MCP23017_GPIOA);
         wiresend(currentRegister |= M17_BIT_BZ);
-        while(Wire.endTransmission());
+        if(ARDUINO >= 155)
+          Wire.endTransmission();
+        else
+          while(Wire.endTransmission());     
     while((long)(ontime + (cycletime/2) - micros()) > 0);
         Wire.beginTransmission(MCP23017_ADDRESS | _i2cAddr);
         wiresend(MCP23017_GPIOA);
         wiresend(currentRegister &= ~M17_BIT_BZ);
-        while(Wire.endTransmission());
+        if(ARDUINO >= 155)
+          Wire.endTransmission();
+        else
+          while(Wire.endTransmission());   
     while((long)(ontime + cycletime - micros()) > 0);
    }
 }
